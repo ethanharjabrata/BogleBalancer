@@ -60,5 +60,5 @@ if __name__ == "__main__":
   # Specify assets and time frame
   target_tickers = ["VTI", "VXUS", "BND"]
   plot_ticker_monthly_returns(
-      tickers=target_tickers, start_year=2021, end_year=2025
+      tickers=target_tickers, start_year=2000, end_year=2025
   )
