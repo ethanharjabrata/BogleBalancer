@@ -25,7 +25,7 @@ This project evaluates the viability of DRL agents in portfolio management by te
 
 ## Project Roadmap
 
-* [ ] **Phase 1: Baseline Benchmark** — Establish baseline performance metrics against classic static Boglehead strategies (e.g., 80/20 fixed, target-date glidepaths).
+* [ ] **Phase 1: Baseline Benchmark** — Establish baseline performance metrics against classic static Boglehead strategies (e.g., 80/20 fixed, target-date glidepaths) + Sensitivity test on rebalancing thresholds.
 
 ## Disclaimer
 *This repository is strictly for academic research and experimental simulation. It does not constitute financial advice. Machine learning models trained on historical financial data can overfit, fail on out-of-distribution events, and generate unintended trading behaviors.*
