@@ -1,7 +1,21 @@
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import quantstats as qs
+import yaml
 from scipy.optimize import newton
+
+# Resolve path relative to this script's directory
+SETTINGS_PATH = Path(__file__).parent / "settings.yaml"
+
+
+def load_settings(config_path: Path = SETTINGS_PATH) -> dict:
+    """Loads configuration settings from YAML."""
+    if not config_path.exists():
+        return {"benchmark_ticker": "VTI", "risk_free_ticker": "VBIL"}
+
+    with open(config_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
 
 
 def compute_portfolio_metrics(
@@ -10,8 +24,11 @@ def compute_portfolio_metrics(
     risk_free_history: pd.Series | None = None,
     cash_flows: pd.Series | None = None,
     periods_per_year: int = 252,
+    config_path: Path = SETTINGS_PATH,
 ) -> dict[str, float]:
     """Calculates portfolio performance metrics using QuantStats and SciPy.
+
+    Reads benchmark and risk-free defaults from settings.yaml if not explicitly passed.
 
     Parameters:
     -----------
@@ -20,16 +37,20 @@ def compute_portfolio_metrics(
     benchmark_history : pd.Series, optional
         Series of benchmark total return prices (e.g., VTI) for Beta.
     risk_free_history : pd.Series, optional
-        Series of risk-free total returns (e.g., SGOV/BIL).
+        Series of risk-free total returns (e.g., VBIL).
     cash_flows : pd.Series, optional
         Series of external cash flows (+inflows / -withdrawals).
     periods_per_year : int, default 252
         Trading periods per year.
+    config_path : Path
+        Path to settings.yaml configuration file.
 
     Returns:
     --------
     dict containing CAGR/IRR, Volatility, Sharpe Ratio, Max Drawdown, and Beta.
     """
+    settings = load_settings(config_path)
+
     portfolio_history = portfolio_history.sort_index().dropna()
     dates = portfolio_history.index
     port_returns = portfolio_history.pct_change().dropna()
@@ -38,7 +59,10 @@ def compute_portfolio_metrics(
     rf_rate = 0.0
     if risk_free_history is not None:
         rf_returns = risk_free_history.reindex(dates).pct_change().dropna()
-        rf_rate = (1 + rf_returns.mean()) ** periods_per_year - 1
+        if not rf_returns.empty:
+            rf_rate = (1 + rf_returns.mean()) ** periods_per_year - 1
+        else:
+            rf_rate = 0.0  # Fallback to zero risk-free rate if history is missing
 
     # 2. Return Metric (IRR vs CAGR via QuantStats)
     if cash_flows is not None and not cash_flows.dropna().empty:
@@ -78,6 +102,8 @@ def compute_portfolio_metrics(
         "Sharpe Ratio": float(sharpe_ratio),
         "Max Drawdown": float(max_drawdown),
         "Beta": float(beta),
+        "Benchmark Asset": settings.get("benchmark_ticker", "VTI"),
+        "Risk-Free Asset": settings.get("risk_free_ticker", "VBIL"),
     }
 
 

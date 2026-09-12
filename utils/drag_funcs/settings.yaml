@@ -1,0 +1,6 @@
+
+brokerage_fee_func: "us_investor"
+
+capital_gains_func: "us_investor"
+
+dividend_witholding_func: "us_investor"
