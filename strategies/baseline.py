@@ -62,10 +62,21 @@ def _tax_profile(path: Path | str) -> TaxProfile:
     return TaxProfile(s["filing_status"], _number(s.get("ordinary_taxable_income"), "ordinary taxable income", True), _number(s.get("magi"), "MAGI", True), _number(s.get("state_tax_rate"), "state tax rate", True))
 
 def _clean_prices(prices: pd.DataFrame, tickers: tuple[str, str]) -> pd.DataFrame:
-    if not isinstance(prices, pd.DataFrame) or prices.empty: raise ValueError("Market prices must be a non-empty DataFrame")
-    r = prices.copy().reindex(columns=list(tickers)); r.index = pd.to_datetime(r.index).tz_localize(None); r = r.sort_index()
-    if r.index.has_duplicates or r.isna().any().any() or not np.isfinite(r.to_numpy(float)).all() or (r <= 0).any().any(): raise ValueError("Market prices must have unique dates and complete, positive finite closes")
-    return r.astype(float)
+    if not isinstance(prices, pd.DataFrame): raise ValueError("Market prices must be provided as a DataFrame")
+    if prices.empty: raise ValueError("Market prices must not be empty")
+    missing = [ticker for ticker in tickers if ticker not in prices.columns]
+    if missing: raise ValueError(f"Market prices must be complete; missing ticker columns: {missing}")
+    r = prices.loc[:, list(tickers)].copy()
+    try: r.index = pd.to_datetime(r.index).tz_localize(None)
+    except (TypeError, ValueError) as exc: raise ValueError("Market price dates must be valid timestamps") from exc
+    if r.index.has_duplicates: raise ValueError("Market price dates must be unique")
+    r = r.sort_index()
+    try: r = r.astype(float)
+    except (TypeError, ValueError) as exc: raise ValueError("Market prices must be numeric") from exc
+    if r.isna().any().any(): raise ValueError("Market prices must not contain missing values")
+    if not np.isfinite(r.to_numpy()).all(): raise ValueError("Market prices must be finite")
+    if (r <= 0).any().any(): raise ValueError("Market prices must be positive")
+    return r
 
 def _clean_dividends(dividends: pd.DataFrame | None, tickers: tuple[str, str]) -> pd.DataFrame:
     if dividends is None: return pd.DataFrame(0., index=pd.DatetimeIndex([]), columns=list(tickers))
