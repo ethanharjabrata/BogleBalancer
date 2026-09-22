@@ -1,30 +1,15 @@
-from pathlib import Path
 import numpy as np
 import pandas as pd
 import quantstats as qs
-import yaml
 from scipy.optimize import newton
-
-# Resolve path relative to this script's directory
-SETTINGS_PATH = Path(__file__).parent / "settings.yaml"
-
-
-def load_settings(config_path: Path = SETTINGS_PATH) -> dict:
-    """Loads configuration settings from YAML."""
-    if not config_path.exists():
-        return {"benchmark_ticker": "VTI", "risk_free_ticker": "VBIL"}
-
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
-
 
 def compute_portfolio_metrics(
     portfolio_history: pd.Series,
-    benchmark_history: pd.Series | None = None,
+    prices: pd.DataFrame | None = None,
+    settings: dict | None = None,
     risk_free_history: pd.Series | None = None,
     cash_flows: pd.Series | None = None,
     periods_per_year: int = 252,
-    config_path: Path = SETTINGS_PATH,
 ) -> dict[str, float]:
     """Calculates portfolio performance metrics using QuantStats and SciPy.
 
@@ -34,22 +19,21 @@ def compute_portfolio_metrics(
     -----------
     portfolio_history : pd.Series
         Series of total portfolio net value indexed by datetime.
-    benchmark_history : pd.Series, optional
-        Series of benchmark total return prices (e.g., VTI) for Beta.
+    prices : pd.DataFrame, optional
+        DataFrame of total return prices containing the configured benchmark ticker.
+    settings : dict, optional
+        Summary settings containing ``benchmark_ticker`` and ``risk_free_ticker``.
     risk_free_history : pd.Series, optional
         Series of risk-free total returns (e.g., VBIL).
     cash_flows : pd.Series, optional
         Series of external cash flows (+inflows / -withdrawals).
     periods_per_year : int, default 252
         Trading periods per year.
-    config_path : Path
-        Path to settings.yaml configuration file.
-
     Returns:
     --------
     dict containing CAGR/IRR, Volatility, Sharpe Ratio, Max Drawdown, and Beta.
     """
-    settings = load_settings(config_path)
+    settings = settings or {}
 
     portfolio_history = portfolio_history.sort_index().dropna()
     dates = portfolio_history.index
@@ -91,7 +75,9 @@ def compute_portfolio_metrics(
 
     # 4. Beta via QuantStats
     beta = np.nan
-    if benchmark_history is not None:
+    benchmark_ticker = settings.get("benchmark_ticker", "VTI")
+    if prices is not None and benchmark_ticker in prices:
+        benchmark_history = prices[benchmark_ticker]
         bm_returns = benchmark_history.reindex(dates).pct_change().dropna()
         common_idx = port_returns.index.intersection(bm_returns.index)
         beta = qs.stats.greeks(port_returns.loc[common_idx], bm_returns.loc[common_idx])["beta"]

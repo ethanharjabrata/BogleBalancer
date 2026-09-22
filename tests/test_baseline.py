@@ -32,6 +32,17 @@ def test_outputs_are_series_and_drag_is_lower_with_taxable_dividend(config, pric
     assert "CAGR" in metrics
 
 
+def test_summary_beta_uses_configured_benchmark_prices(config, prices):
+    path, _ = config
+    gross, _ = simulate_baseline(path, market_data=prices)
+    metrics = compute_portfolio_metrics(
+        gross,
+        prices=prices,
+        settings={"benchmark_ticker": "AAA"},
+    )
+    assert np.isfinite(metrics["Beta"])
+
+
 def test_invalid_weights_fail_before_market_loading(config):
     path, value = config; value["baseline"]["us_bonds_weight"] = .20; path.write_text(yaml.safe_dump(value), encoding="utf-8")
     with pytest.raises(ValueError, match="sum to 1"):
