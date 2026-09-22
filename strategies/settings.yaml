@@ -11,6 +11,6 @@ baseline:
   us_bonds_weight: 0.25
   # The frequency at which the portfolio is rebalanced.
   # For anything that isn't daily, assumes done on the first trading day of that period
-  rebalance_frequency: "monthly"
+  rebalance_frequency: "daily"
   # Minimum portfolio drift at which the rebalance will happen
   rebalance_threshold: 0.05
