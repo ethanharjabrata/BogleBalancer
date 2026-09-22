@@ -70,10 +70,11 @@ def _clean_prices(prices: pd.DataFrame, tickers: tuple[str, str]) -> pd.DataFram
     try: r.index = pd.to_datetime(r.index).tz_localize(None)
     except (TypeError, ValueError) as exc: raise ValueError("Market price dates must be valid timestamps") from exc
     if r.index.has_duplicates: raise ValueError("Market price dates must be unique")
-    r = r.sort_index()
+    r = r.sort_index().ffill()
     try: r = r.astype(float)
     except (TypeError, ValueError) as exc: raise ValueError("Market prices must be numeric") from exc
-    if r.isna().any().any(): raise ValueError("Market prices must not contain missing values")
+    missing_tickers = r.columns[r.isna().any()].tolist()
+    if missing_tickers: raise ValueError(f"Market prices are still missing for ticker(s): {missing_tickers}")
     if not np.isfinite(r.to_numpy()).all(): raise ValueError("Market prices must be finite")
     if (r <= 0).any().any(): raise ValueError("Market prices must be positive")
     return r
