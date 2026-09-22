@@ -4,3 +4,9 @@ brokerage_fee_func: "us_investor"
 capital_gains_func: "us_investor"
 
 dividend_witholding_func: "us_investor"
+
+us_investor_settings:
+  filing_status: "single"
+  state_tax_rate: 0.0
+  ordinary_taxable_income: 40000
+  magi: 40000

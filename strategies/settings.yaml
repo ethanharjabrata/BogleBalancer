@@ -1,3 +1,9 @@
+timeframe:
+  start_year: 2000
+  end_year: 2025
+inflows:
+  frequency: "monthly"
+  value: 1000
 baseline:
   us_equities_ticker: "VTI"
   us_equities_weight: 0.75
