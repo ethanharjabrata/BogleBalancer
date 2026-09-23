@@ -20,6 +20,7 @@ def main() -> None:
     baseline_settings = load_settings(BASELINE_SETTINGS_PATH)
     summary_settings = load_summary_settings()
     baseline_config = baseline_settings["baseline"]
+    inflow_config = baseline_settings["inflows"]
     tickers = (
         baseline_config["us_equities_ticker"],
         baseline_config["us_bonds_ticker"],
@@ -42,6 +43,8 @@ def main() -> None:
             history,
             prices=prices,
             settings=summary_settings,
+            inflow_value=inflow_config["value"],
+            inflow_frequency=inflow_config["frequency"],
         ).items():
             print(f"{metric}: {value}")
         print(f"Ending value: {history.iloc[-1]:,.2f}")

@@ -9,6 +9,8 @@ def compute_portfolio_metrics(
     settings: dict | None = None,
     risk_free_history: pd.Series | None = None,
     cash_flows: pd.Series | None = None,
+    inflow_value: float | None = None,
+    inflow_frequency: str | None = None,
     periods_per_year: int = 252,
 ) -> dict[str, float]:
     """Calculates portfolio performance metrics using QuantStats and SciPy.
@@ -27,6 +29,12 @@ def compute_portfolio_metrics(
         Series of risk-free total returns (e.g., VBIL).
     cash_flows : pd.Series, optional
         Series of external cash flows (+inflows / -withdrawals).
+    inflow_value : float, optional
+        Fixed contribution made at each date in ``inflow_frequency``. Supply this
+        together with ``inflow_frequency`` to calculate cash-flow-adjusted returns.
+    inflow_frequency : str, optional
+        One of daily, monthly, quarterly, or yearly. Contributions occur on the
+        first observed date of each corresponding calendar period.
     periods_per_year : int, default 252
         Trading periods per year.
     Returns:
@@ -39,6 +47,17 @@ def compute_portfolio_metrics(
     dates = portfolio_history.index
     port_returns = portfolio_history.pct_change().dropna()
 
+    regular_inflows = None
+    if (inflow_value is None) != (inflow_frequency is None):
+        raise ValueError("inflow_value and inflow_frequency must be provided together")
+    if inflow_value is not None:
+        if inflow_frequency not in {"daily", "monthly", "quarterly", "yearly"}:
+            raise ValueError("inflow_frequency must be daily, monthly, quarterly, or yearly")
+        if not np.isfinite(inflow_value) or inflow_value < 0:
+            raise ValueError("inflow_value must be a non-negative finite number")
+        regular_inflows = _regular_inflows(dates, float(inflow_value), inflow_frequency)
+    return_cash_flows = cash_flows if cash_flows is not None else regular_inflows
+
     # 1. Risk-Free Rate Handling
     rf_rate = 0.0
     if risk_free_history is not None:
@@ -49,18 +68,21 @@ def compute_portfolio_metrics(
             rf_rate = 0.0  # Fallback to zero risk-free rate if history is missing
 
     # 2. Return Metric (IRR vs CAGR via QuantStats)
-    if cash_flows is not None and not cash_flows.dropna().empty:
+    if return_cash_flows is not None and not return_cash_flows.dropna().empty:
         cf_dates = [dates[0]]
         cf_values = [-float(portfolio_history.iloc[0])]
 
-        aligned_cf = cash_flows.reindex(dates).fillna(0.0)
+        aligned_cf = return_cash_flows.reindex(dates).fillna(0.0)
         for d, cf_val in aligned_cf.items():
             if cf_val != 0 and d != dates[0] and d != dates[-1]:
                 cf_dates.append(d)
                 cf_values.append(-float(cf_val))
 
         cf_dates.append(dates[-1])
-        cf_values.append(float(portfolio_history.iloc[-1]))
+        terminal_value = float(portfolio_history.iloc[-1])
+        if regular_inflows is not None and cash_flows is None:
+            terminal_value -= float(aligned_cf.iloc[-1])
+        cf_values.append(terminal_value)
 
         annualized_return = _calculate_xirr_scipy(pd.Series(cf_values, index=cf_dates))
         return_metric_name = "Annualized IRR (Cash-Flow Adj.)"
@@ -68,7 +90,7 @@ def compute_portfolio_metrics(
         annualized_return = qs.stats.cagr(portfolio_history, rf=rf_rate, periods=periods_per_year)
         return_metric_name = "CAGR"
 
-    yearly_cagrs = _calculate_yearly_cagrs(portfolio_history)
+    yearly_cagrs = _calculate_yearly_cagrs(portfolio_history, regular_inflows)
     finite_yearly_cagrs = np.asarray(yearly_cagrs, dtype=float)
     finite_yearly_cagrs = finite_yearly_cagrs[np.isfinite(finite_yearly_cagrs)]
     if finite_yearly_cagrs.size:
@@ -106,7 +128,22 @@ def compute_portfolio_metrics(
     }
 
 
-def _calculate_yearly_cagrs(portfolio_history: pd.Series) -> list[float]:
+def _regular_inflows(
+    dates: pd.DatetimeIndex, value: float, frequency: str
+) -> pd.Series:
+    """Build fixed contributions on the first observed date per calendar period."""
+    if frequency == "daily":
+        eligible = dates
+    else:
+        period = {"monthly": "M", "quarterly": "Q", "yearly": "Y"}[frequency]
+        keys = dates.to_period(period)
+        eligible = dates[~keys.duplicated()]
+    return pd.Series(value, index=eligible, dtype=float)
+
+
+def _calculate_yearly_cagrs(
+    portfolio_history: pd.Series, cash_flows: pd.Series | None = None
+) -> list[float]:
     """Return annualized growth rates for anniversary-based yearly intervals.
 
     Each interval begins at the first observation and then at each preceding
@@ -130,6 +167,18 @@ def _calculate_yearly_cagrs(portfolio_history: pd.Series) -> list[float]:
     def interval_cagr(end_position: int) -> float:
         start_value = float(history.iloc[start_position])
         end_value = float(history.iloc[end_position])
+        if cash_flows is not None:
+            interval_dates = dates[start_position:end_position + 1]
+            interval_flows = cash_flows.reindex(interval_dates).fillna(0.0)
+            flows = [-start_value]
+            flow_dates = [pd.Timestamp(dates[start_position])]
+            for flow_date, flow in interval_flows.iloc[1:].items():
+                if flow != 0 and flow_date != dates[end_position]:
+                    flow_dates.append(pd.Timestamp(flow_date))
+                    flows.append(-float(flow))
+            flow_dates.append(pd.Timestamp(dates[end_position]))
+            flows.append(end_value - float(interval_flows.iloc[-1]))
+            return _calculate_xirr_scipy(pd.Series(flows, index=flow_dates))
         elapsed_days = (pd.Timestamp(dates[end_position]) - pd.Timestamp(dates[start_position])).total_seconds() / 86400
         if elapsed_days <= 0 or start_value <= 0 or end_value <= 0:
             return np.nan

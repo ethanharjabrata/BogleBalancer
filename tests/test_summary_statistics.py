@@ -26,3 +26,18 @@ def test_yearly_cagr_quartiles_include_annualized_final_partial_year():
         np.quantile(yearly_cagrs, [0.25, 0.5, 0.75]),
     ):
         assert metrics[label] == pytest.approx(expected)
+
+
+def test_regular_contributions_are_removed_from_annualized_returns():
+    dates = pd.date_range("2020-01-01", "2022-01-01", freq="MS")
+    dates = dates.insert(0, pd.Timestamp("2019-12-01"))
+    history = pd.Series(1000.0 * np.arange(1, len(dates) + 1), index=dates)
+
+    metrics = compute_portfolio_metrics(
+        history,
+        inflow_value=1000.0,
+        inflow_frequency="monthly",
+    )
+
+    assert metrics["Annualized IRR (Cash-Flow Adj.)"] == pytest.approx(0.0, abs=1e-6)
+    assert metrics["Yearly CAGR Q2"] == pytest.approx(0.0, abs=1e-6)
