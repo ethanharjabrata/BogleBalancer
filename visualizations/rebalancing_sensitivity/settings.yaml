@@ -1,0 +1,5 @@
+rebalance_threshold_min: 0
+rebalance_threshold_max: 0.1
+rebalance_threshold_step: 0.01
+benchmark_ticker: "VTSMX"
+risk_free_ticker: "VFISX"
