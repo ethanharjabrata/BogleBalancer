@@ -68,6 +68,16 @@ def compute_portfolio_metrics(
         annualized_return = qs.stats.cagr(portfolio_history, rf=rf_rate, periods=periods_per_year)
         return_metric_name = "CAGR"
 
+    yearly_cagrs = _calculate_yearly_cagrs(portfolio_history)
+    finite_yearly_cagrs = np.asarray(yearly_cagrs, dtype=float)
+    finite_yearly_cagrs = finite_yearly_cagrs[np.isfinite(finite_yearly_cagrs)]
+    if finite_yearly_cagrs.size:
+        yearly_cagr_q1, yearly_cagr_q2, yearly_cagr_q3 = np.quantile(
+            finite_yearly_cagrs, [0.25, 0.5, 0.75]
+        )
+    else:
+        yearly_cagr_q1 = yearly_cagr_q2 = yearly_cagr_q3 = np.nan
+
     # 3. QuantStats Risk Metrics
     ann_volatility = qs.stats.volatility(port_returns, periods=periods_per_year)
     sharpe_ratio = qs.stats.sharpe(port_returns, rf=rf_rate, periods=periods_per_year)
@@ -84,6 +94,9 @@ def compute_portfolio_metrics(
 
     return {
         return_metric_name: float(annualized_return),
+        "Yearly CAGR Q1": float(yearly_cagr_q1),
+        "Yearly CAGR Q2": float(yearly_cagr_q2),
+        "Yearly CAGR Q3": float(yearly_cagr_q3),
         "Annualized Volatility": float(ann_volatility),
         "Sharpe Ratio": float(sharpe_ratio),
         "Max Drawdown": float(max_drawdown),
@@ -91,6 +104,53 @@ def compute_portfolio_metrics(
         "Benchmark Asset": settings.get("benchmark_ticker", "VTI"),
         "Risk-Free Asset": settings.get("risk_free_ticker", "VBIL"),
     }
+
+
+def _calculate_yearly_cagrs(portfolio_history: pd.Series) -> list[float]:
+    """Return annualized growth rates for anniversary-based yearly intervals.
+
+    Each interval begins at the first observation and then at each preceding
+    anniversary valuation. If an anniversary falls between observations, use
+    the most recent value on or before it. Any remaining final interval is
+    annualized using its actual elapsed time.
+    """
+    if len(portfolio_history) < 2:
+        return []
+
+    history = portfolio_history.sort_index().dropna()
+    if len(history) < 2:
+        return []
+
+    dates = history.index
+    first_date = pd.Timestamp(dates[0])
+    last_date = pd.Timestamp(dates[-1])
+    start_position = 0
+    yearly_cagrs = []
+
+    def interval_cagr(end_position: int) -> float:
+        start_value = float(history.iloc[start_position])
+        end_value = float(history.iloc[end_position])
+        elapsed_days = (pd.Timestamp(dates[end_position]) - pd.Timestamp(dates[start_position])).total_seconds() / 86400
+        if elapsed_days <= 0 or start_value <= 0 or end_value <= 0:
+            return np.nan
+        return (end_value / start_value) ** (365.25 / elapsed_days) - 1
+
+    year_number = 1
+    while True:
+        anniversary = first_date + pd.DateOffset(years=year_number)
+        if anniversary > last_date:
+            break
+
+        end_position = dates.searchsorted(anniversary, side="right") - 1
+        if end_position > start_position:
+            yearly_cagrs.append(float(interval_cagr(end_position)))
+            start_position = end_position
+        year_number += 1
+
+    if start_position < len(history) - 1:
+        yearly_cagrs.append(float(interval_cagr(len(history) - 1)))
+
+    return yearly_cagrs
 
 
 def _calculate_xirr_scipy(cash_flows: pd.Series) -> float:
