@@ -39,7 +39,8 @@ def compute_portfolio_metrics(
         Trading periods per year.
     Returns:
     --------
-    dict containing CAGR/IRR, Volatility, Sharpe Ratio, Max Drawdown, and Beta.
+    dict containing annualized return, yearly IRR quartiles, Volatility,
+    Sharpe Ratio, Max Drawdown, and Beta.
     """
     settings = settings or {}
 
@@ -90,15 +91,15 @@ def compute_portfolio_metrics(
         annualized_return = qs.stats.cagr(portfolio_history, rf=rf_rate, periods=periods_per_year)
         return_metric_name = "CAGR"
 
-    yearly_cagrs = _calculate_yearly_cagrs(portfolio_history, regular_inflows)
-    finite_yearly_cagrs = np.asarray(yearly_cagrs, dtype=float)
-    finite_yearly_cagrs = finite_yearly_cagrs[np.isfinite(finite_yearly_cagrs)]
-    if finite_yearly_cagrs.size:
-        yearly_cagr_q1, yearly_cagr_q2, yearly_cagr_q3 = np.quantile(
-            finite_yearly_cagrs, [0.25, 0.5, 0.75]
+    yearly_irrs = _calculate_yearly_irrs(portfolio_history, regular_inflows)
+    finite_yearly_irrs = np.asarray(yearly_irrs, dtype=float)
+    finite_yearly_irrs = finite_yearly_irrs[np.isfinite(finite_yearly_irrs)]
+    if finite_yearly_irrs.size:
+        yearly_irr_q1, yearly_irr_q2, yearly_irr_q3 = np.quantile(
+            finite_yearly_irrs, [0.25, 0.5, 0.75]
         )
     else:
-        yearly_cagr_q1 = yearly_cagr_q2 = yearly_cagr_q3 = np.nan
+        yearly_irr_q1 = yearly_irr_q2 = yearly_irr_q3 = np.nan
 
     # 3. QuantStats Risk Metrics
     ann_volatility = qs.stats.volatility(port_returns, periods=periods_per_year)
@@ -116,9 +117,9 @@ def compute_portfolio_metrics(
 
     return {
         return_metric_name: float(annualized_return),
-        "Yearly CAGR Q1": float(yearly_cagr_q1),
-        "Yearly CAGR Q2": float(yearly_cagr_q2),
-        "Yearly CAGR Q3": float(yearly_cagr_q3),
+        "Yearly IRR Q1": float(yearly_irr_q1),
+        "Yearly IRR Q2": float(yearly_irr_q2),
+        "Yearly IRR Q3": float(yearly_irr_q3),
         "Annualized Volatility": float(ann_volatility),
         "Sharpe Ratio": float(sharpe_ratio),
         "Max Drawdown": float(max_drawdown),
@@ -141,10 +142,10 @@ def _regular_inflows(
     return pd.Series(value, index=eligible, dtype=float)
 
 
-def _calculate_yearly_cagrs(
+def _calculate_yearly_irrs(
     portfolio_history: pd.Series, cash_flows: pd.Series | None = None
 ) -> list[float]:
-    """Return annualized growth rates for anniversary-based yearly intervals.
+    """Return dated IRRs for anniversary-based yearly intervals.
 
     Each interval begins at the first observation and then at each preceding
     anniversary valuation. If an anniversary falls between observations, use
@@ -162,27 +163,26 @@ def _calculate_yearly_cagrs(
     first_date = pd.Timestamp(dates[0])
     last_date = pd.Timestamp(dates[-1])
     start_position = 0
-    yearly_cagrs = []
+    yearly_irrs = []
 
-    def interval_cagr(end_position: int) -> float:
+    def interval_irr(end_position: int) -> float:
         start_value = float(history.iloc[start_position])
         end_value = float(history.iloc[end_position])
-        if cash_flows is not None:
-            interval_dates = dates[start_position:end_position + 1]
-            interval_flows = cash_flows.reindex(interval_dates).fillna(0.0)
-            flows = [-start_value]
-            flow_dates = [pd.Timestamp(dates[start_position])]
-            for flow_date, flow in interval_flows.iloc[1:].items():
-                if flow != 0 and flow_date != dates[end_position]:
-                    flow_dates.append(pd.Timestamp(flow_date))
-                    flows.append(-float(flow))
-            flow_dates.append(pd.Timestamp(dates[end_position]))
-            flows.append(end_value - float(interval_flows.iloc[-1]))
-            return _calculate_xirr_scipy(pd.Series(flows, index=flow_dates))
-        elapsed_days = (pd.Timestamp(dates[end_position]) - pd.Timestamp(dates[start_position])).total_seconds() / 86400
-        if elapsed_days <= 0 or start_value <= 0 or end_value <= 0:
-            return np.nan
-        return (end_value / start_value) ** (365.25 / elapsed_days) - 1
+        interval_dates = dates[start_position:end_position + 1]
+        interval_flows = (
+            cash_flows.reindex(interval_dates).fillna(0.0)
+            if cash_flows is not None
+            else pd.Series(0.0, index=interval_dates)
+        )
+        flows = [-start_value]
+        flow_dates = [pd.Timestamp(dates[start_position])]
+        for flow_date, flow in interval_flows.iloc[1:].items():
+            if flow != 0 and flow_date != dates[end_position]:
+                flow_dates.append(pd.Timestamp(flow_date))
+                flows.append(-float(flow))
+        flow_dates.append(pd.Timestamp(dates[end_position]))
+        flows.append(end_value - float(interval_flows.iloc[-1]))
+        return _calculate_xirr_scipy(pd.Series(flows, index=flow_dates))
 
     year_number = 1
     while True:
@@ -192,14 +192,14 @@ def _calculate_yearly_cagrs(
 
         end_position = dates.searchsorted(anniversary, side="right") - 1
         if end_position > start_position:
-            yearly_cagrs.append(float(interval_cagr(end_position)))
+            yearly_irrs.append(float(interval_irr(end_position)))
             start_position = end_position
         year_number += 1
 
     if start_position < len(history) - 1:
-        yearly_cagrs.append(float(interval_cagr(len(history) - 1)))
+        yearly_irrs.append(float(interval_irr(len(history) - 1)))
 
-    return yearly_cagrs
+    return yearly_irrs
 
 
 def _calculate_xirr_scipy(cash_flows: pd.Series) -> float:

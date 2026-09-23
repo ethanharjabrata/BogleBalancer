@@ -32,3 +32,8 @@ dev = [
     "ruff>=0.16.6",
     "seaborn>=0.13.2",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "overly_specific: relies on a value that may change as market data changes",
+]
