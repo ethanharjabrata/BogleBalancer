@@ -43,7 +43,7 @@ def _frequency(value: Any, name: str) -> str:
     if result not in _FREQUENCIES: raise ValueError(f"Unsupported {name}: {value!r}; supported values are {sorted(_FREQUENCIES)}")
     return result
 
-def _validate_config(s: dict[str, Any]) -> _Config:
+def _validate_config(s: dict[str, Any], rebalance_threshold: float | None = None) -> _Config:
     try: timeframe, baseline, inflows = s["timeframe"], s["baseline"], s["inflows"]
     except KeyError as exc: raise ValueError(f"Missing required baseline settings section: {exc.args[0]}") from exc
     if not all(isinstance(x, dict) for x in (timeframe, baseline, inflows)): raise ValueError("timeframe, baseline, and inflows must be mappings")
@@ -53,7 +53,8 @@ def _validate_config(s: dict[str, Any]) -> _Config:
     if not all(isinstance(x, str) and x.strip() for x in tickers): raise ValueError("baseline requires two non-empty ticker strings")
     weights = np.array([_number(baseline.get("us_equities_weight"), "equity weight"), _number(baseline.get("us_bonds_weight"), "bond weight")])
     if np.any(weights < 0) or not np.isclose(weights.sum(), 1, atol=_WEIGHT_TOLERANCE, rtol=0): raise ValueError(f"Baseline weights must be non-negative and sum to 1.0 within {_WEIGHT_TOLERANCE}")
-    return _Config(start, end, (tickers[0].strip(), tickers[1].strip()), weights, _frequency(baseline.get("rebalance_frequency"), "rebalance frequency"), _number(baseline.get("rebalance_threshold"), "rebalance threshold", True), _frequency(inflows.get("frequency"), "inflow frequency"), _number(inflows.get("value"), "inflow value", True))
+    threshold = baseline.get("rebalance_threshold") if rebalance_threshold is None else rebalance_threshold
+    return _Config(start, end, (tickers[0].strip(), tickers[1].strip()), weights, _frequency(baseline.get("rebalance_frequency"), "rebalance frequency"), _number(threshold, "rebalance threshold", True), _frequency(inflows.get("frequency"), "inflow frequency"), _number(inflows.get("value"), "inflow value", True))
 
 def _tax_profile(path: Path | str) -> TaxProfile:
     s = load_settings(path).get("us_investor_settings")
@@ -150,9 +151,9 @@ def _run(prices: pd.DataFrame, dividends: pd.DataFrame, cfg: _Config, profile: T
         history.append(cash+float(shares@price))
     return pd.Series(history,index=dates,dtype=float,name="net_portfolio_value" if profile else "gross_portfolio_value")
 
-def simulate_baseline(config_path: Path | str = SETTINGS_PATH, drag_config_path: Path | str = DRAG_SETTINGS_PATH, *, market_data: pd.DataFrame | None = None, dividends: pd.DataFrame | None = None) -> tuple[pd.Series, pd.Series]:
+def simulate_baseline(config_path: Path | str = SETTINGS_PATH, drag_config_path: Path | str = DRAG_SETTINGS_PATH, *, rebalance_threshold: float | None = None, market_data: pd.DataFrame | None = None, dividends: pd.DataFrame | None = None) -> tuple[pd.Series, pd.Series]:
     """Return independent float-valued gross/net histories indexed by trading date."""
-    cfg = _validate_config(load_settings(config_path)); profile = _tax_profile(drag_config_path)
+    cfg = _validate_config(load_settings(config_path), rebalance_threshold); profile = _tax_profile(drag_config_path)
     prices, events = load_market_data(cfg.tickers,cfg.start_year,cfg.end_year) if market_data is None else (_clean_prices(market_data,cfg.tickers),_clean_dividends(dividends,cfg.tickers))
     gross, net = _run(prices,events,cfg,None), _run(prices,events,cfg,profile)
     if gross.empty or net.empty or gross.isna().any() or net.isna().any(): raise ValueError("Simulation produced an invalid empty or missing history")

@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import yaml
 
-from strategies.baseline import eligible_dates, simulate_baseline
+from strategies.baseline import eligible_dates, load_market_data, load_settings, simulate_baseline
 from utils.summary_statistics.calculate_summary import compute_portfolio_metrics
 
 
@@ -25,7 +25,7 @@ def prices():
 def test_outputs_are_series_and_drag_is_lower_with_taxable_dividend(config, prices):
     path, _ = config
     dividends = pd.DataFrame({"AAA":[0, 2, 0, 0, 0], "BBB":[0]*5}, index=prices.index)
-    gross, net = simulate_baseline(path, market_data=prices, dividends=dividends)
+    gross, net = simulate_baseline(path, rebalance_threshold=0.01, market_data=prices, dividends=dividends)
     assert gross.index.equals(prices.index) and gross.dtype == float and np.isfinite(net).all()
     assert gross.iloc[-1] > net.iloc[-1]
     metrics = compute_portfolio_metrics(gross)
@@ -34,7 +34,7 @@ def test_outputs_are_series_and_drag_is_lower_with_taxable_dividend(config, pric
 
 def test_summary_beta_uses_configured_benchmark_prices(config, prices):
     path, _ = config
-    gross, _ = simulate_baseline(path, market_data=prices)
+    gross, _ = simulate_baseline(path, rebalance_threshold=0.01, market_data=prices)
     metrics = compute_portfolio_metrics(
         gross,
         prices=prices,
@@ -46,7 +46,7 @@ def test_summary_beta_uses_configured_benchmark_prices(config, prices):
 def test_invalid_weights_fail_before_market_loading(config):
     path, value = config; value["baseline"]["us_bonds_weight"] = .20; path.write_text(yaml.safe_dump(value), encoding="utf-8")
     with pytest.raises(ValueError, match="sum to 1"):
-        simulate_baseline(path)
+        simulate_baseline(path, rebalance_threshold=0.01)
 
 
 def test_schedule_uses_first_trading_day():
@@ -63,7 +63,35 @@ def test_threshold_and_invalid_market_data(config, prices):
     # Without rebalancing only the first contribution exists: 75% AAA, 25% BBB.
     assert gross.iloc[-1] == pytest.approx(1600)
     with pytest.raises(ValueError, match="complete"):
-        simulate_baseline(path, market_data=prices.drop(columns="BBB"))
+        simulate_baseline(path, rebalance_threshold=99, market_data=prices.drop(columns="BBB"))
     high["inflows"]["frequency"] = "weekly"; path.write_text(yaml.safe_dump(high), encoding="utf-8")
     with pytest.raises(ValueError, match="Unsupported inflow frequency"):
-        simulate_baseline(path, market_data=prices)
+        simulate_baseline(path, rebalance_threshold=99, market_data=prices)
+
+
+@pytest.mark.overly_specific
+def test_q2_irr_with_explicit_rebalance_threshold():
+    from examples.baseline import BASELINE_SETTINGS_PATH, load_summary_settings
+
+    settings = load_settings(BASELINE_SETTINGS_PATH)
+    baseline = settings["baseline"]
+    inflows = settings["inflows"]
+    prices, dividends = load_market_data(
+        (baseline["us_equities_ticker"], baseline["us_bonds_ticker"]),
+        settings["timeframe"]["start_year"],
+        settings["timeframe"]["end_year"],
+    )
+    _, net = simulate_baseline(
+        BASELINE_SETTINGS_PATH,
+        rebalance_threshold=0.1,
+        market_data=prices,
+        dividends=dividends,
+    )
+    metrics = compute_portfolio_metrics(
+        net,
+        prices=prices,
+        settings=load_summary_settings(),
+        inflow_value=inflows["value"],
+        inflow_frequency=inflows["frequency"],
+    )
+    assert metrics["Yearly IRR Q2"] == pytest.approx(0.11418170336172273, rel=1e-12)
